@@ -1,15 +1,19 @@
 package backends
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/araddon/gou"
 	"github.com/cloudfoundry/bbl-state-resource/storage"
 	"github.com/lytics/cloudstorage"
 	"github.com/lytics/cloudstorage/awss3"
-	"github.com/mholt/archiver"
+	"github.com/mholt/archiver/v4"
 )
 
 type Config struct {
@@ -76,7 +80,84 @@ func (c cloudStorageBackend) GetState(config Config, name string) error {
 		return err
 	}
 
-	err = archiver.TarGz.Read(stateTar, config.Dest)
+	format := archiver.CompressedArchive{
+		Compression: archiver.Gz{},
+		Archival:    archiver.Tar{},
+	}
+
+	handler := func(ctx context.Context, f archiver.File) error {
+		hdr, ok := f.Header.(*tar.Header)
+
+		if !ok {
+			return nil
+		}
+
+		var fpath = filepath.Join(config.Dest, f.NameInArchive)
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(fpath, 0755); err != nil {
+				return fmt.Errorf("failed to make directory %s: %w", fpath, err)
+			}
+			return nil
+
+		case tar.TypeReg, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
+			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+				return fmt.Errorf("failed to make directory %s: %w", filepath.Dir(fpath), err)
+			}
+
+			out, err := os.Create(fpath)
+			if err != nil {
+				return fmt.Errorf("%s: creating new file: %v", fpath, err)
+			}
+			defer out.Close()
+
+			err = out.Chmod(f.Mode())
+			if err != nil && runtime.GOOS != "windows" {
+				return fmt.Errorf("%s: changing file mode: %v", fpath, err)
+			}
+
+			in, err := f.Open()
+			if err != nil {
+				return err
+			}
+
+			_, err = io.Copy(out, in)
+			if err != nil {
+				return fmt.Errorf("%s: writing file: %v", fpath, err)
+			}
+			return nil
+
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+				return fmt.Errorf("failed to make directory %s: %w", filepath.Dir(fpath), err)
+			}
+
+			err = os.Symlink(hdr.Linkname, fpath)
+			if err != nil {
+				return fmt.Errorf("%s: making symbolic link for: %v", fpath, err)
+			}
+			return nil
+
+		case tar.TypeLink:
+			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+				return fmt.Errorf("failed to make directory %s: %w", filepath.Dir(fpath), err)
+			}
+
+			err = os.Link(filepath.Join(fpath, hdr.Linkname), fpath)
+			if err != nil {
+				return fmt.Errorf("%s: making symbolic link for: %v", fpath, err)
+			}
+			return nil
+
+		case tar.TypeXGlobalHeader:
+			return nil // ignore the pax global header from git-generated tarballs
+		default:
+			return fmt.Errorf("%s: unknown type flag: %c", hdr.Name, hdr.Typeflag)
+		}
+	}
+
+	err = format.Extract(context.TODO(), stateTar, nil, handler)
 	if err != nil {
 		return fmt.Errorf("unable to untar state dir: %s", err)
 	}
