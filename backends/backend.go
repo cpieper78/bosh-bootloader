@@ -23,6 +23,7 @@ type Config struct {
 	Bucket               string
 	Region               string
 	Dest                 string
+	Source               string
 }
 
 type Provider interface {
@@ -48,6 +49,7 @@ func (p provider) Client(iaas string) (Backend, error) {
 
 type Backend interface {
 	GetState(Config, string) error
+	SetState(Config, string) error
 }
 
 type cloudStorageBackend struct{}
@@ -165,6 +167,36 @@ func (c cloudStorageBackend) GetState(config Config, name string) error {
 	return nil
 }
 
+func (c cloudStorageBackend) SetState(config Config, name string) error {
+	// TODO: implement
+	// first we need to get gcp working.
+	awsAuthSettings := make(gou.JsonHelper)
+	awsAuthSettings[awss3.ConfKeyAccessKey] = config.AWSAccessKeyID
+	awsAuthSettings[awss3.ConfKeyAccessSecret] = config.AWSSecretAccessKey
+
+	csConfig := cloudstorage.Config{
+		Type:       awss3.StoreType,
+		AuthMethod: awss3.AuthAccessKey,
+		Bucket:     config.Bucket,
+		Settings:   awsAuthSettings,
+		Region:     config.Region,
+	}
+
+	store, err := cloudstorage.NewStore(&csConfig)
+	if err != nil {
+		return err
+	}
+
+	obj, err := store.NewObject(name)
+	if err != nil {
+		return err
+	}
+
+	obj.Close()
+
+	return err
+}
+
 type gcsStateBackend struct{}
 
 func (g gcsStateBackend) GetState(config Config, name string) error {
@@ -178,9 +210,28 @@ func (g gcsStateBackend) GetState(config Config, name string) error {
 		return fmt.Errorf("could not create GCS client: %s", err)
 	}
 
-	_, err = gcsClient.Download(config.Dest)
+	_, err = gcsClient.Download(config.Source)
 	if err != nil {
 		return fmt.Errorf("downloading remote state from GCS: %s", err)
+	}
+
+	return nil
+}
+
+func (g gcsStateBackend) SetState(config Config, name string) error {
+	key, err := g.getGCPServiceAccountKey(config.GCPServiceAccountKey)
+	if err != nil {
+		return fmt.Errorf("could not read GCP service account key: %s", err)
+	}
+
+	gcsClient, err := storage.NewStorageClient(key, name, config.Bucket)
+	if err != nil {
+		return fmt.Errorf("could not create GCS client: %s", err)
+	}
+
+	_, err = gcsClient.Upload(config.Source)
+	if err != nil {
+		return fmt.Errorf("upload remote state to GCS: %s", err)
 	}
 
 	return nil
