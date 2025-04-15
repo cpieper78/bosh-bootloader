@@ -89,7 +89,7 @@ resource "aws_elb" "cf_ssh_lb" {
   idle_timeout = "${var.elb_idle_timeout}"
 
   security_groups = ["${aws_security_group.cf_ssh_lb_security_group.id}"]
-  subnets         = flatten(["${aws_subnet.lb_subnets.*.id}"])
+  subnets         = [for subnet in aws_subnet.lb_subnets : subnet.id]
 
   tags = {
     Name = "${var.env_id}"
@@ -220,7 +220,7 @@ resource "aws_elb" "cf_router_lb" {
   idle_timeout = "${var.elb_idle_timeout}"
 
   security_groups = ["${aws_security_group.cf_router_lb_security_group.id}"]
-  subnets         = flatten(["${aws_subnet.lb_subnets.*.id}"])
+  subnets         = [for subnet in aws_subnet.lb_subnets : subnet.id]
 
   tags = {
     Name = "${var.env_id}"
@@ -1036,7 +1036,7 @@ resource "aws_elb" "cf_tcp_lb" {
   idle_timeout = "${var.elb_idle_timeout}"
 
   security_groups = ["${aws_security_group.cf_tcp_lb_security_group.id}"]
-  subnets         = flatten(["${aws_subnet.lb_subnets.*.id}"])
+  subnets         = [for subnet in aws_subnet.lb_subnets : subnet.id]
 
   tags = {
     Name = "${var.env_id}"

@@ -55,7 +55,7 @@ resource "aws_security_group_rule" "concourse_lb_internal_egress" {
 resource "aws_lb" "concourse_lb" {
   name               = "${var.short_env_id}-concourse-lb"
   load_balancer_type = "network"
-  subnets            = flatten(["${aws_subnet.lb_subnets.*.id}"])
+  subnets            = [for subnet in aws_subnet.lb_subnets : subnet.id]
 
   tags = {
     Name = "${var.env_id}"

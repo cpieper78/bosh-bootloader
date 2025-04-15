@@ -30,7 +30,7 @@ resource "aws_route_table_association" "route_lb_subnets" {
 }
 
 output "lb_subnet_ids" {
-  value = ["${aws_subnet.lb_subnets.*.id}"]
+  value = [for subnet in aws_subnet.lb_subnets : subnet.id]
 }
 
 output "lb_subnet_availability_zones" {
